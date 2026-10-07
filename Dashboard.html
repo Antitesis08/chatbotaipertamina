@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<title>Dashboard Supply Loss + AI Chatbot</title>
+<style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+        font-family: Segoe UI, Arial, sans-serif;
+        background: #f0f2f5;
+        height: 100vh;
+        display: flex;
+        flex-direction: column;
+    }
+    header {
+        background: #2c2c2c;
+        color: white;
+        padding: 12px 20px;
+        font-size: 18px;
+        font-weight: bold;
+    }
+    .main-container {
+        flex: 1;
+        display: flex;
+        overflow: hidden;
+    }
+    .dashboard-panel {
+        flex: 3;
+        border-right: 2px solid #ddd;
+    }
+    .dashboard-panel iframe {
+        width: 100%;
+        height: 100%;
+        border: none;
+    }
+    .chat-panel {
+        flex: 1;
+        min-width: 320px;
+        display: flex;
+        flex-direction: column;
+        background: white;
+    }
+    .chat-header {
+        background: #1a73e8;
+        color: white;
+        padding: 12px;
+        font-weight: bold;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    }
+    .chat-logo {
+        height: 28px;
+        width: auto;
+        object-fit: contain;
+    }
+    .chat-messages {
+        flex: 1;
+        overflow-y: auto;
+        padding: 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+    }
+    .message {
+        padding: 8px 12px;
+        border-radius: 10px;
+        max-width: 85%;
+        white-space: pre-wrap;
+        font-size: 14px;
+        line-height: 1.4;
+    }
+    .message.user {
+        background: #1a73e8;
+        color: white;
+        align-self: flex-end;
+    }
+    .message.ai {
+        background: #f0f0f0;
+        color: #222;
+        align-self: flex-start;
+    }
+    .message.loading {
+        background: #f0f0f0;
+        color: #888;
+        align-self: flex-start;
+        font-style: italic;
+    }
+    .chat-input-area {
+        display: flex;
+        padding: 10px;
+        border-top: 1px solid #ddd;
+        gap: 8px;
+    }
+    .chat-input-area input {
+        flex: 1;
+        padding: 10px;
+        border: 1px solid #ccc;
+        border-radius: 6px;
+        font-size: 14px;
+    }
+    .chat-input-area button {
+        padding: 10px 16px;
+        background: #1a73e8;
+        color: white;
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 14px;
+    }
+    .chat-input-area button:disabled {
+        background: #aaa;
+        cursor: not-allowed;
+    }
+</style>
+</head>
+<body>
+
+<header>Dashboard Supply Loss - Pertamina Patra Niaga</header>
+
+<div class="main-container">
+    <div class="dashboard-panel">
+        <!-- src URL report PBIRS -->
+        <iframe src="http://Sulthan/Reports/powerbi/Dashboard%20Supply%20Loss%20V2.0?rs:embed=true"></iframe>
+    </div>
+
+    <div class="chat-panel"> 
+        <div class="chat-header">
+            <img src="pertamina-logo.png" alt="Logo Pertamina" class="chat-logo">
+            <span>Pertamina Patra Niaga</span>
+        </div>
+        <div class="chat-messages" id="chatMessages">
+            <div class="message ai">Halo! Tanyakan apa saja seputar data supply loss (kapal, biaya, volume, loss).</div>
+        </div>
+        <div class="chat-input-area">
+            <input type="text" id="userInput" placeholder="Ketik pertanyaan..." onkeypress="if(event.key==='Enter') sendMessage()">
+            <button id="sendBtn" onclick="sendMessage()">Kirim</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    // GANTI alamat ini kalau API server Anda tidak di localhost:5000
+    const API_URL = "http://127.0.0.1:5000/chat";
+
+    async function sendMessage() {
+        const input = document.getElementById("userInput");
+        const question = input.value.trim();
+        if (!question) return;
+
+        const messagesDiv = document.getElementById("chatMessages");
+        const sendBtn = document.getElementById("sendBtn");
+
+        // Tampilkan pesan user
+        const userMsg = document.createElement("div");
+        userMsg.className = "message user";
+        userMsg.textContent = question;
+        messagesDiv.appendChild(userMsg);
+
+        input.value = "";
+        input.disabled = true;
+        sendBtn.disabled = true;
+
+        // Tampilkan indikator loading
+        const loadingMsg = document.createElement("div");
+        loadingMsg.className = "message loading";
+        loadingMsg.textContent = "AI sedang berpikir...";
+        messagesDiv.appendChild(loadingMsg);
+        messagesDiv.scrollTop = messagesDiv.scrollHeight;
+
+        try {
+            const response = await fetch(API_URL, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ question: question })
+            });
+            const data = await response.json();
+
+            loadingMsg.remove();
+            const aiMsg = document.createElement("div");
+            aiMsg.className = "message ai";
+            aiMsg.textContent = data.answer;
+            messagesDiv.appendChild(aiMsg);
+        } catch (error) {
+            loadingMsg.remove();
+            const errMsg = document.createElement("div");
+            errMsg.className = "message ai";
+            errMsg.textContent = "Maaf, gagal menghubungi server AI. Pastikan api_server.py sedang berjalan.";
+            messagesDiv.appendChild(errMsg);
+        }
+
+        input.disabled = false;
+        sendBtn.disabled = false;
+        input.focus();
+        messagesDiv.scrollTop = messagesDiv.scrollHeight;
+    }
+</script>
+
+</body>
+</html>
