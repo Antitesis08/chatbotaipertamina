@@ -49,6 +49,15 @@
         align-items: center;
         gap: 10px;
     }
+    .chat-header button {
+        margin-left: auto;
+        padding: 6px 10px;
+        border: 1px solid rgba(255, 255, 255, 0.7);
+        border-radius: 6px;
+        background: transparent;
+        color: white;
+        cursor: pointer;
+    }
     .chat-logo {
         height: 28px;
         width: auto;
@@ -128,6 +137,7 @@
         <div class="chat-header">
             <img src="pertamina-logo.png" alt="Logo Pertamina" class="chat-logo">
             <span>Pertamina Patra Niaga</span>
+            <button type="button" onclick="resetConversation()">Percakapan baru</button>
         </div>
         <div class="chat-messages" id="chatMessages">
             <div class="message ai">Halo! Tanyakan apa saja seputar data supply loss (kapal, biaya, volume, loss).</div>
@@ -142,6 +152,13 @@
 <script>
     // GANTI alamat ini kalau API server Anda tidak di localhost:5000
     const API_URL = "http://127.0.0.1:5000/chat";
+    const RESET_URL = "http://127.0.0.1:5000/reset";
+    const SESSION_ID_KEY = "supplyLossSessionId";
+    let sessionId = sessionStorage.getItem(SESSION_ID_KEY);
+    if (!sessionId) {
+        sessionId = crypto.randomUUID();
+        sessionStorage.setItem(SESSION_ID_KEY, sessionId);
+    }
 
     async function sendMessage() {
         const input = document.getElementById("userInput");
@@ -172,9 +189,16 @@
             const response = await fetch(API_URL, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ question: question })
+                body: JSON.stringify({
+                    question: question,
+                    session_id: sessionId
+                })
             });
             const data = await response.json();
+            if (data.session_id && data.session_id !== sessionId) {
+                sessionId = data.session_id;
+                sessionStorage.setItem(SESSION_ID_KEY, sessionId);
+            }
 
             loadingMsg.remove();
             const aiMsg = document.createElement("div");
@@ -193,6 +217,38 @@
         sendBtn.disabled = false;
         input.focus();
         messagesDiv.scrollTop = messagesDiv.scrollHeight;
+    }
+
+    async function resetConversation() {
+        const messagesDiv = document.getElementById("chatMessages");
+        const sendBtn = document.getElementById("sendBtn");
+        const input = document.getElementById("userInput");
+        input.disabled = true;
+        sendBtn.disabled = true;
+        try {
+            const response = await fetch(RESET_URL, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ session_id: sessionId })
+            });
+            if (!response.ok) {
+                throw new Error("Reset request failed.");
+            }
+            messagesDiv.innerHTML = "";
+            const welcome = document.createElement("div");
+            welcome.className = "message ai";
+            welcome.textContent = "Halo! Tanyakan apa saja seputar data supply loss (kapal, biaya, volume, loss).";
+            messagesDiv.appendChild(welcome);
+        } catch (error) {
+            const errMsg = document.createElement("div");
+            errMsg.className = "message ai";
+            errMsg.textContent = "Gagal menghapus konteks percakapan. Silakan coba lagi.";
+            messagesDiv.appendChild(errMsg);
+        } finally {
+            input.disabled = false;
+            sendBtn.disabled = false;
+            input.focus();
+        }
     }
 </script>
 

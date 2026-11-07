@@ -31,7 +31,6 @@ from mcp.server.fastmcp import FastMCP
 from sqlalchemy import create_engine, text
 
 import warnings
-import re
 
 warnings.filterwarnings("ignore")
 
@@ -148,161 +147,164 @@ def get_table_schema() -> str:
 # VALIDASI SQL
 # =============================================================================
 
-def validate_sql(sql_query: str):
+def tokenize_sql(sql_query: str):
+    """Return SQL tokens while ignoring comments and quoted contents."""
+    tokens = []
+    index = 0
 
-    # -------------------------------------------------------------------------
-    # HARUS STRING
-    # -------------------------------------------------------------------------
+    while index < len(sql_query):
+        char = sql_query[index]
 
-    if not isinstance(
-        sql_query,
-        str
-    ):
+        if char.isspace():
+            index += 1
+            continue
 
-        return (
-            False,
-            "DITOLAK: sql_query harus berupa string."
-        )
-
-
-    # -------------------------------------------------------------------------
-    # TRIM
-    # -------------------------------------------------------------------------
-
-    sql_query = sql_query.strip()
-
-
-    if not sql_query:
-
-        return (
-            False,
-            "DITOLAK: query SQL kosong."
-        )
-
-
-    cleaned = sql_query.upper().strip()
-
-
-    # -------------------------------------------------------------------------
-    # HANYA SELECT / WITH
-    # -------------------------------------------------------------------------
-
-    if not (
-        cleaned.startswith("SELECT")
-        or cleaned.startswith("WITH")
-    ):
-
-        return (
-            False,
-            "DITOLAK: hanya query SELECT "
-            "atau WITH ... SELECT yang diizinkan."
-        )
-
-
-    # -------------------------------------------------------------------------
-    # WITH HARUS MEMILIKI SELECT
-    # -------------------------------------------------------------------------
-
-    if cleaned.startswith("WITH"):
-
-        if "SELECT" not in cleaned:
-
-            return (
-                False,
-                "DITOLAK: query WITH harus "
-                "mengandung SELECT."
+        if sql_query.startswith("--", index):
+            line_end = min(
+                (
+                    position
+                    for position in (
+                        sql_query.find("\n", index + 2),
+                        sql_query.find("\r", index + 2),
+                    )
+                    if position != -1
+                ),
+                default=-1,
             )
+            if line_end == -1:
+                index = len(sql_query)
+            else:
+                index = line_end + 1
+                if (
+                    sql_query[line_end] == "\r"
+                    and index < len(sql_query)
+                    and sql_query[index] == "\n"
+                ):
+                    index += 1
+            continue
+
+        if sql_query.startswith("/*", index):
+            index += 2
+            depth = 1
+            while index < len(sql_query) and depth:
+                if sql_query.startswith("/*", index):
+                    depth += 1
+                    index += 2
+                elif sql_query.startswith("*/", index):
+                    depth -= 1
+                    index += 2
+                else:
+                    index += 1
+            if depth:
+                return None
+            continue
+
+        if char in ("'", '"', "["):
+            closing = "]" if char == "[" else char
+            index += 1
+            while index < len(sql_query):
+                if sql_query[index] == closing:
+                    if index + 1 < len(sql_query) and sql_query[index + 1] == closing:
+                        index += 2
+                        continue
+                    index += 1
+                    break
+                index += 1
+            else:
+                return None
+            tokens.append("QUOTED")
+            continue
+
+        if char.isalpha() or char in "_@#":
+            end = index + 1
+            while end < len(sql_query) and (
+                sql_query[end].isalnum() or sql_query[end] in "_@$#"
+            ):
+                end += 1
+            tokens.append(sql_query[index:end].upper())
+            index = end
+            continue
+
+        tokens.append(char)
+        index += 1
+
+    return tokens
 
 
-    # -------------------------------------------------------------------------
-    # TIDAK BOLEH MULTI STATEMENT
-    # -------------------------------------------------------------------------
+def validate_sql(sql_query: str):
+    if not isinstance(sql_query, str):
+        return False, "DITOLAK: sql_query harus berupa string."
 
-    sql_without_final_semicolon = (
-        cleaned
-        .rstrip(";")
-        .strip()
-    )
+    tokens = tokenize_sql(sql_query.strip())
+    if tokens is None:
+        return False, "DITOLAK: query memiliki komentar atau kutipan yang tidak lengkap."
+    if not tokens:
+        return False, "DITOLAK: query SQL kosong."
 
+    semicolons = [index for index, token in enumerate(tokens) if token == ";"]
+    if len(semicolons) > 1 or (
+        semicolons and semicolons[0] != len(tokens) - 1
+    ):
+        return False, "DITOLAK: hanya satu statement SQL yang diperbolehkan."
+    if semicolons:
+        tokens.pop()
 
-    if ";" in sql_without_final_semicolon:
-
+    if not tokens or tokens[0] not in {"SELECT", "WITH"}:
         return (
             False,
-            "DITOLAK: hanya satu statement SQL "
-            "yang diperbolehkan."
+            "DITOLAK: hanya query SELECT atau WITH ... SELECT yang diizinkan.",
         )
+    if tokens[0] == "WITH" and "SELECT" not in tokens:
+        return False, "DITOLAK: query WITH harus mengandung SELECT."
 
-
-    # -------------------------------------------------------------------------
-    # KEYWORD BERBAHAYA
-    # -------------------------------------------------------------------------
-
-    forbidden_keywords = [
-
-        "DROP",
-        "DELETE",
-        "UPDATE",
-        "INSERT",
+    forbidden_keywords = {
         "ALTER",
-        "TRUNCATE",
+        "BACKUP",
+        "BEGIN",
+        "BULK",
+        "COMMIT",
+        "CREATE",
+        "DBCC",
+        "DECLARE",
+        "DELETE",
+        "DENY",
+        "DROP",
         "EXEC",
         "EXECUTE",
-        "CREATE",
-        "MERGE",
+        "GO",
         "GRANT",
-        "REVOKE",
-        "DENY",
-        "BACKUP",
-        "RESTORE",
-        "SHUTDOWN",
-        "DBCC",
-        "WAITFOR",
+        "INSERT",
+        "INTO",
+        "KILL",
+        "MERGE",
+        "OPENQUERY",
+        "OPENDATASOURCE",
         "OPENROWSET",
-        "OPENDATASOURCE"
+        "PRINT",
+        "RAISERROR",
+        "RESTORE",
+        "REVOKE",
+        "ROLLBACK",
+        "SAVE",
+        "SET",
+        "SHUTDOWN",
+        "TRAN",
+        "TRANSACTION",
+        "TRUNCATE",
+        "UPDATE",
+        "USE",
+        "WAITFOR",
+    }
 
-    ]
+    for token in tokens:
+        if token in forbidden_keywords:
+            return False, f"DITOLAK: kata kunci SQL tidak diizinkan: {token}."
+        if token.startswith("XP_"):
+            return False, "DITOLAK: extended procedure tidak diizinkan."
+        if token == "NEXT":
+            return False, "DITOLAK: akses sequence tidak diizinkan."
 
-
-    for keyword in forbidden_keywords:
-
-        pattern = (
-            rf"\b{re.escape(keyword)}\b"
-        )
-
-
-        if re.search(
-            pattern,
-            cleaned
-        ):
-
-            return (
-                False,
-                "DITOLAK: query mengandung "
-                f"kata kunci yang tidak diizinkan: {keyword}"
-            )
-
-
-    # -------------------------------------------------------------------------
-    # XP PROCEDURE
-    # -------------------------------------------------------------------------
-
-    if re.search(
-        r"\bxp_[a-zA-Z0-9_]+",
-        sql_query
-    ):
-
-        return (
-            False,
-            "DITOLAK: extended procedure "
-            "tidak diizinkan."
-        )
-
-
-    return (
-        True,
-        ""
-    )
+    return True, ""
 
 
 # =============================================================================
