@@ -61,6 +61,10 @@ connection_string = (
 # ENGINE
 # =============================================================================
 
+# [V10][COMPONENT DIAGRAM - SQL Server]
+# [V10][SEQUENCE - MCP Server ke SQL Server]
+# Koneksi SQLAlchemy ini menjadi perantara MCP Server untuk mengakses tabel input_discharge pada SQL Server.
+
 engine = create_engine(
     connection_string
 )
@@ -69,6 +73,10 @@ engine = create_engine(
 # =============================================================================
 # MCP
 # =============================================================================
+
+# [V10][COMPONENT DIAGRAM - MCP Server]
+# [V10][SEQUENCE - MCP Client ke MCP Server]
+# FastMCP ini menyediakan tool query_database yang dipanggil chatbot untuk eksekusi SQL yang aman pada database.
 
 mcp = FastMCP(
     "supply-loss-data"
@@ -146,6 +154,10 @@ def get_table_schema() -> str:
 # =============================================================================
 # VALIDASI SQL
 # =============================================================================
+
+# [V10][FLOWCHART 3 - Validasi Query pada MCP Server]
+# [V10][SEQUENCE - MCP Server memvalidasi SQL]
+# Fungsi ini memeriksa query agar hanya operasi SELECT/WITH yang aman dan tidak berbahaya yang diizinkan dijalankan.
 
 def tokenize_sql(sql_query: str):
     """Return SQL tokens while ignoring comments and quoted contents."""
@@ -310,6 +322,10 @@ def validate_sql(sql_query: str):
 # =============================================================================
 # TOOL 2 - QUERY DATABASE
 # =============================================================================
+
+# [V10][FLOWCHART 3 - Eksekusi Query SQL Server]
+# [V10][SEQUENCE - MCP Server ke SQL Server]
+# Tool ini menerima query yang lolos validasi, menjalankannya di SQL Server, dan mengembalikan hasil dalam bentuk teks.
 
 @mcp.tool()
 def query_database(sql_query: str) -> str:

@@ -40,6 +40,10 @@ from chatbot import answer_question
 # FLASK APP
 # =============================================================================
 
+# [V10][COMPONENT DIAGRAM - Flask API]
+# [V10][SEQUENCE - Dashboard ke Flask API]
+# Komponen Flask API yang menerima request JSON dari dashboard dan meneruskan pertanyaan ke chatbot.
+
 app = Flask(
     __name__
 )
@@ -62,6 +66,10 @@ def get_session_lock(session_id):
 # =============================================================================
 # POST /chat
 # =============================================================================
+
+# [V10][FLOWCHART 1 - Validasi Request]
+# [V10][SEQUENCE - Flask API menerima request]
+# Fungsi ini memvalidasi format JSON, isi field question, dan session_id sebelum meneruskan pertanyaan ke answer_question().
 
 @app.route(
     "/chat",
