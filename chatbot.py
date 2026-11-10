@@ -26,8 +26,10 @@ Model:
 
 import asyncio
 import json
+import logging
 import os
 import re
+import traceback
 
 import ollama
 
@@ -40,6 +42,74 @@ from mcp.client.stdio import stdio_client
 # =============================================================================
 
 OLLAMA_MODEL = "llama3.2"
+logger = logging.getLogger(__name__)
+
+
+def ollama_error_category(error):
+    class_names = {
+        exception_class.__name__.lower()
+        for exception_class in type(error).__mro__
+    }
+    message = str(error).lower()
+
+    if (
+        isinstance(error, ollama.ResponseError)
+        and getattr(error, "status_code", None) == 404
+        and "model" in message
+        and any(term in message for term in ("not found", "does not exist"))
+    ):
+        return "model_not_available"
+    if (
+        any("timeout" in class_name for class_name in class_names)
+        or "timed out" in message
+    ):
+        return "timeout"
+    if (
+        any(
+            "connect" in class_name or "connection" in class_name
+            for class_name in class_names
+        )
+        or any(
+            term in message
+            for term in (
+                "connection refused",
+                "failed to connect",
+                "connection reset",
+                "network is unreachable",
+            )
+        )
+    ):
+        return "connection"
+    if isinstance(error, ollama.ResponseError):
+        return "response"
+    if isinstance(error, ollama.RequestError):
+        return "request"
+    return "unexpected"
+
+
+def redact_ollama_log_details(value):
+    value = re.sub(
+        r"(?i)(https?://)[^/@\s]+:[^/@\s]+@",
+        r"\1[REDACTED]@",
+        value,
+    )
+    value = re.sub(
+        r"(?i)(authorization\s*[=:]\s*['\"]?)"
+        r"(?:bearer\s+)?[^\s,;}\"']+",
+        r"\1[REDACTED]",
+        value,
+    )
+    value = re.sub(
+        r"(?i)(authorization|api[_-]?key|access[_-]?token|password|secret)"
+        r"(\s*[=:]\s*)(['\"]?)[^'\"\s,;}]+",
+        r"\1\2\3[REDACTED]",
+        value,
+    )
+    return re.sub(
+        r"(?i)(bearer\s+)[A-Za-z0-9._~+/-]+=*",
+        r"\1[REDACTED]",
+        value,
+    )
 
 
 BASE_DIR = os.path.dirname(
@@ -66,7 +136,7 @@ server_params = StdioServerParameters(
 
 
 # =============================================================================
-# TOOL YANG DIKENAL OLLAMA
+# TOOL OLLAMA
 # =============================================================================
 
 TOOLS = [
@@ -76,12 +146,26 @@ TOOLS = [
             "name": "query_database",
 
             "description": (
-                "Menjalankan query SQL SELECT atau WITH SELECT "
-                "ke database Supply Loss. "
-                "Gunakan tabel input_discharge. "
-                "Semua data harus berasal dari database. "
-                "Gunakan SUM, GROUP BY, ORDER BY, WHERE, TOP "
-                "dan fungsi SQL lainnya sesuai kebutuhan."
+                "Buat satu query SELECT lengkap yang sesuai dengan "
+                "pertanyaan pengguna untuk dbo.input_discharge. Gunakan "
+                "hanya kolom pada schema instruksi sistem; jangan "
+                "mengarang tabel atau kolom. Untuk loss saja, jumlahkan "
+                "SUM(R4_N) dengan WHERE R4_N < 0; jangan gunakan ABS(). "
+                "Untuk pertanyaan distribusi loss berdasarkan tujuan, "
+                "gunakan query lengkap: SELECT DESTINATION, SUM(R4_N) AS "
+                "total_loss FROM dbo.input_discharge WHERE R4_N < 0 GROUP "
+                "BY DESTINATION ORDER BY total_loss ASC. Untuk pertanyaan "
+                "tren perubahan loss berdasarkan bulan, artikan tren sebagai "
+                "total loss per bulan secara kronologis (bukan selisih "
+                "berjalan) dan gunakan query lengkap: SELECT YEAR(BL_DATE) "
+                "AS tahun, MONTH(BL_DATE) AS bulan, SUM(R4_N) AS total_loss "
+                "FROM dbo.input_discharge WHERE R4_N < 0 GROUP BY "
+                "YEAR(BL_DATE), MONTH(BL_DATE) ORDER BY tahun ASC, bulan "
+                "ASC. Jangan mengubah pola tersebut menjadi pivot, jangan "
+                "menambah CASE, fungsi window OVER, gain/netral, atau kolom "
+                "lain, dan jangan kelompokkan tren bulanan menurut "
+                "DESTINATION. Patuhi instruksi sistem untuk pertanyaan lain. "
+                "Isi hanya sql_query; query divalidasi sebelum dijalankan."
             ),
 
             "parameters": {
@@ -93,8 +177,10 @@ TOOLS = [
                         "type": "string",
 
                         "description": (
-                            "Query SQL SELECT atau WITH SELECT "
-                            "yang valid untuk tabel input_discharge."
+                            "Satu query SQL SELECT atau WITH ... SELECT yang "
+                            "valid untuk dbo.input_discharge, menggunakan "
+                            "hanya kolom yang tercantum pada schema di "
+                            "instruksi sistem."
                         )
                     }
 
@@ -114,8 +200,6 @@ TOOLS = [
 # =============================================================================
 #
 # SEMUA BULAN JANUARI - DESEMBER MENGARAH KE BL_DATE.
-#
-# Tidak hanya June.
 #
 # =============================================================================
 
@@ -217,9 +301,56 @@ tujuan, atau periode, gunakan hasil query database sebagai satu-satunya sumber
 fakta. Jangan menjalankan query hanya karena pertanyaan mengandung kata
 "loss", "gain", "kapal", atau "volume".
 
+ATURAN UTAMA UNTUK DUA BENTUK PERTANYAAN:
+
+Jika pengguna bertanya "Bagaimana distribusi loss berdasarkan tujuan
+pengiriman?", gunakan query lengkap berikut sebagai pola:
+
+    SELECT DESTINATION, SUM(R4_N) AS total_loss
+    FROM dbo.input_discharge
+    WHERE R4_N < 0
+    GROUP BY DESTINATION
+    ORDER BY total_loss ASC
+
+Jika pengguna bertanya "Bagaimana tren perubahan loss berdasarkan bulan?",
+artikan tren sebagai total loss untuk setiap bulan/tahun secara kronologis,
+bukan selisih berjalan. Gunakan query lengkap berikut sebagai pola:
+
+    SELECT YEAR(BL_DATE) AS tahun, MONTH(BL_DATE) AS bulan,
+           SUM(R4_N) AS total_loss
+    FROM dbo.input_discharge
+    WHERE R4_N < 0
+    GROUP BY YEAR(BL_DATE), MONTH(BL_DATE)
+    ORDER BY tahun ASC, bulan ASC
+
+Untuk kedua pola tersebut, jangan menambah kolom atau perhitungan lain,
+jangan gunakan ABS(), dan jangan membuat query pivot. Untuk tren bulanan,
+jangan gunakan CASE, fungsi window OVER, CTE, atau subquery. Terapkan pola
+hanya jika sesuai maksud pertanyaan; jangan menambah filter periode yang
+tidak diminta.
+
 Data berasal dari tabel:
 
     input_discharge
+
+Schema aktual tabel input_discharge (gunakan daftar ini sebagai acuan nama
+kolom yang valid; jangan mengarang nama tabel atau kolom):
+
+    NO, BL_DATE, BL_NUMBER, CQD_DATE, CQD_NUMBER, SHIPMENT_NUMBER,
+    VESSEL_NAME, FROM, DESTINATION, MATERIAL_NUMBER, GRADE, GROSS, NETT,
+    AFTER_LOADING, BEFORE_DISCHARGE, GROSS1, NETT1, R1_G, R2_G, R3_G,
+    R4_G, R4_N, AMOUNT_G_L_TRANSPORT, Unnamed:_23, Unnamed:_24, GROSS2,
+    NETT2, B_L, SHIP_TANK, MASTER_SAMPLE, Unnamed:_30, Unnamed:_31,
+    Unnamed:_32, Unnamed:_33, PIPELINE_SFAL, PIPELINE_SFBD,
+    PIPELINE_BL_=_AR_GROSS, PIPELINE_BL_=_AR_NETT, R1_G1, R2_G1, R3_G1,
+    R4_G1, R4_N1, DIFF_R1, DIFF_R2, DIFF_R3, DIFF_R4_GROSS,
+    DIFF_R4_NETT, JENIS_REPORT, JENIS_PRODUK_MQAR, BULAN,
+    KODE_REPORT_ROB_OBQ, KEY_REPORT_SL, KEY_REPORT_ROBOBQ, CEK_duplicate,
+    ALAT_ANGKUT, TAHUN, KEY_1_MAT, KEY_2_SN_+_MAT, CEK_SN_DUPLICATE
+
+Schema aktual ini adalah acuan nama kolom. Jika contoh atau petunjuk lain di
+konteks menyebut nama yang tidak ada pada daftar ini, jangan gunakan nama
+tersebut dalam SQL.
 
 Untuk pertanyaan tentang data, jalankan tool query_database terlebih dahulu.
 Jangan menjawab dengan contoh atau usulan SQL; jawab hanya dari hasil tool
@@ -534,6 +665,51 @@ dan metrik loss:
 
 
 JANGAN menggunakan DESTINATION untuk mencari nama kapal.
+
+ANALISIS LOSS BERDASARKAN TUJUAN:
+
+Jika pengguna meminta distribusi atau total loss berdasarkan tujuan
+pengiriman, kelompokkan berdasarkan DESTINATION dan hitung SUM(R4_N).
+Untuk analisis loss saja, filter R4_N < 0. Urutkan total loss ASC agar nilai
+paling negatif tampil lebih dahulu. Jangan gunakan ABS(R4_N), karena tanda
+negatif adalah informasi Supply Loss.
+
+Contoh pola:
+
+    SELECT DESTINATION, SUM(R4_N) AS total_loss
+    FROM dbo.input_discharge
+    WHERE R4_N < 0
+    GROUP BY DESTINATION
+    ORDER BY total_loss ASC
+
+Gunakan pola ini hanya jika sesuai dengan maksud pertanyaan; jangan
+menambahkan filter atau batas periode yang tidak diminta.
+
+
+ANALISIS TREN LOSS BERDASARKAN BULAN:
+
+Jika pengguna meminta tren atau perubahan loss per bulan tanpa menyebut
+bulan tertentu, kelompokkan menurut YEAR(BL_DATE) dan MONTH(BL_DATE), hitung
+SUM(R4_N), filter R4_N < 0, dan urutkan kronologis menurut tahun lalu bulan
+secara ASC. Jangan kelompokkan berdasarkan DESTINATION untuk permintaan tren
+bulanan dan jangan gunakan ABS(R4_N). Pilih hanya tahun, bulan, dan total
+loss; jangan menambahkan CASE, fungsi window OVER, gain/netral, atau metrik
+lain. Gunakan satu SELECT langsung dari tabel, tanpa CTE atau subquery.
+Tren berarti total loss per bulan secara kronologis, bukan perhitungan
+perubahan berjalan. Jangan mengarang batas tahun atau periode yang tidak
+disebutkan.
+
+Contoh pola:
+
+    SELECT YEAR(BL_DATE) AS tahun, MONTH(BL_DATE) AS bulan,
+           SUM(R4_N) AS total_loss
+    FROM dbo.input_discharge
+    WHERE R4_N < 0
+    GROUP BY YEAR(BL_DATE), MONTH(BL_DATE)
+    ORDER BY tahun ASC, bulan ASC
+
+Gunakan pola ini hanya jika sesuai dengan maksud pertanyaan; jangan
+mengubah permintaan analisis lain menjadi tren bulanan.
 
 
 ================================================================================
@@ -3154,7 +3330,21 @@ async def answer_question(
                                 messages=messages,
                                 tools=TOOLS,
                             )
-                        except Exception:
+                        except Exception as error:
+                            error_message = redact_ollama_log_details(
+                                str(error)
+                            )
+                            error_traceback = redact_ollama_log_details(
+                                "".join(traceback.format_tb(error.__traceback__))
+                            )
+                            logger.error(
+                                "Pemanggilan Ollama gagal "
+                                "[%s; %s]: %s\nTraceback:\n%s",
+                                ollama_error_category(error),
+                                type(error).__name__,
+                                error_message,
+                                error_traceback,
+                            )
                             return "Data tidak dapat diambil karena chatbot gagal membuat query."
 
                         assistant_msg = response.get("message", {})
