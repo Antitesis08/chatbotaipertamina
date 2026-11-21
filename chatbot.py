@@ -128,7 +128,7 @@ MCP_SERVER_PATH = os.path.join(
 # =============================================================================
 
 # [V10][COMPONENT DIAGRAM - MCP Client]
-# [V10][SEQUENCE - Chatbot ke MCP Client]
+# Chatbot ke MCP Client
 # Parameter ini menyiapkan koneksi stdio dari chatbot ke MCP Server untuk permintaan eksekusi query.
 
 server_params = StdioServerParameters(
@@ -2474,7 +2474,6 @@ def build_vessel_lookup_query(vessel_name, user_text=None):
 
 
 # [V10][FLOWCHART 2 - Deterministic SQL Builder]
-# [V10][SEQUENCE - Chatbot membentuk query]
 # Fungsi ini mengenali intent dan membangun SQL yang sesuai dengan aturan Supply Loss sebelum query dikirim ke MCP.
 
 def build_targeted_supply_loss_query(user_text):
@@ -2552,7 +2551,7 @@ def build_targeted_supply_loss_query(user_text):
 
 
 # [V10][FLOWCHART 3 - Validasi Query pada Chatbot]
-# [V10][SEQUENCE - Query sebelum eksekusi]
+# [Query sebelum eksekusi]
 # Fungsi ini memeriksa kesesuaian query terhadap intent, tabel input_discharge, dan aturan bisnis sebelum dikirim ke MCP Server.
 
 def validate_query_semantics(user_text, sql_query):
@@ -2715,7 +2714,7 @@ def validate_query_semantics(user_text, sql_query):
 
 
 # [V10][FLOWCHART 4 - Parsing Hasil Query]
-# [V10][SEQUENCE - Hasil Query ke Chatbot]
+# [Hasil Query ke Chatbot]
 # Fungsi ini menguraikan hasil tabel yang dikembalikan MCP Server agar Python dapat menilai data dan menyusun jawaban akhir.
 
 def parse_mcp_table(result_text):
@@ -2758,7 +2757,7 @@ def database_error_answer(error_text):
 
 
 # [V10][FLOWCHART 4 - Penyusunan Jawaban Akhir]
-# [V10][SEQUENCE - Chatbot ke Flask API]
+# [Chatbot ke Flask API]
 # Fungsi ini menerjemahkan hasil query database menjadi jawaban yang sesuai dengan intent user dan menyerahkan respons ke API.
 
 def answer_from_database_result(
@@ -3000,7 +2999,7 @@ def answer_from_database_result(
 
 
 # [V10][FLOWCHART 2 - Pemeriksaan Lingkup Supply Loss]
-# [V10][SEQUENCE - Chatbot memproses konteks percakapan]
+# [Chatbot memproses konteks percakapan]
 # Fungsi ini membatasi pertanyaan yang masuk ke domain Supply Loss agar hanya analisis yang relevan diproses lebih lanjut.
 
 def is_supply_loss_scope_question(user_input):
@@ -3034,7 +3033,7 @@ def is_supply_loss_scope_question(user_input):
 
 
 # [V10][FLOWCHART 2 - Kontekstualisasi Pertanyaan Lanjutan]
-# [V10][SEQUENCE - Chatbot memproses konteks percakapan]
+# [Chatbot memproses konteks percakapan]
 # Fungsi ini menjaga konteks sebelumnya, seperti kapal, bulan, dan tahun, agar pertanyaan lanjutan tetap konsisten.
 
 def contextualize_follow_up(user_input, context):
@@ -3180,7 +3179,7 @@ def update_conversation_context(context, user_input, intent, vessel_name):
 # =============================================================================
 
 # [V10][FLOWCHART 2 - Pemrosesan Pertanyaan oleh AI]
-# [V10][SEQUENCE - Flask API ke Chatbot]
+# [Flask API ke Chatbot]
 # Fungsi ini menerima pertanyaan, menormalisasi konteks, memeriksa pertanyaan konseptual dan lingkup Supply Loss, lalu menjalankan rule-based query atau fallback.
 
 async def answer_question(
